@@ -46,7 +46,6 @@ rpds-py==0.30.0
 service-identity==24.2.0
 sqlparse==0.5.5
 Twisted==25.5.0
-txaio==25.12.2
 typing_extensions==4.15.0
 tzdata==2025.3
 ujson==5.11.0
