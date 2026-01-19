@@ -200,6 +200,7 @@ SIMPLE_JWT = {
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:8000",
+    "http://localhost:4200",
     "http://127.0.0.1:5173",
     "https://sprightly-halva-e74daf.netlify.app",
 ]
@@ -207,6 +208,7 @@ CSRF_TRUSTED_ORIGINS = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:8000",
+    "http://localhost:4200",
     "http://127.0.0.1:5173",
     "https://sprightly-halva-e74daf.netlify.app",
 ]
