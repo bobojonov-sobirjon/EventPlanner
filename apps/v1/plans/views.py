@@ -372,52 +372,6 @@ class PlanDetailAPIView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request):
-        token = request.query_params.get('token')
-        
-        if not token:
-            return Response(
-                {'error': 'Параметр token обязателен.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            token_obj = GenerateTokenPlan.objects.get(token=token)
-            
-            if token_obj.is_activated:
-                existing_plan_user = PlanUser.objects.filter(
-                    plan=token_obj.plan,
-                    token=token_obj
-                ).first()
-                
-                if existing_plan_user and existing_plan_user.user != request.user:
-                    return Response(
-                        {'error': 'Этот токен приглашения уже использован другим пользователем.'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
-            plan = token_obj.plan
-            
-            PlanUser.objects.get_or_create(
-                plan=plan,
-                token=token_obj,
-                user=request.user,
-                defaults={'status': PlanUser.Status.PENDING}
-            )
-            
-            if not token_obj.is_activated:
-                token_obj.is_activated = True
-                token_obj.save()
-            
-            serializer = PlanSerializer(plan)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except GenerateTokenPlan.DoesNotExist:
-            return Response(
-                {'error': 'План с указанным токеном не найден.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
 @extend_schema(
     tags=['Plan Tokens'],
     summary="Сгенерировать токен для плана",
