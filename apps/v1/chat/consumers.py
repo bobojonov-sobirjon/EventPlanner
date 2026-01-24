@@ -61,6 +61,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 return
             
             chat_message = await self.save_message(room, self.user, message)
+            print(f"[DEBUG] Chat message saved - ID: {chat_message.id}, Room ID: {room.id}, User ID: {self.user.id}")
             
             is_room_owner = await self.check_room_owner(room, self.user)
             sender_type = 'initiator' if is_room_owner else 'receiver'
@@ -83,8 +84,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     }
                 }
             )
+            print(f"[DEBUG] Chat message broadcasted to group: {self.room_group_name}")
             
+            print(f"[DEBUG] Calling send_notifications...")
             await self.send_notifications(room, self.user, chat_message)
+            print(f"[DEBUG] send_notifications completed")
         except json.JSONDecodeError:
             await self.send(text_data=json.dumps({
                 'type': 'error',
@@ -133,12 +137,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
     
     async def send_notifications(self, room, sender, chat_message):
         try:
+            print(f"[DEBUG] send_notifications called - Room ID: {room.id}, Sender ID: {sender.id}")
             members = await self.get_room_members(room)
+            print(f"[DEBUG] Found {len(members)} members in room")
             plan_name = await self.get_plan_name(room)
             plan_id = await self.get_plan_id(room)
+            print(f"[DEBUG] Plan: {plan_name} (ID: {plan_id})")
             
             for member in members:
+                print(f"[DEBUG] Processing member ID: {member.id}, Sender ID: {sender.id}")
                 if member.id != sender.id:
+                    print(f"[DEBUG] Creating notification for member ID: {member.id}")
                     notification = await self.create_notification(
                         user=member,
                         notification_type='chat_message',
@@ -151,10 +160,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
                             'plan_id': plan_id
                         }
                     )
+                    print(f"[DEBUG] Notification created with ID: {notification.id} for user ID: {member.id}")
                     
                     notification_data = await self.get_notification_data(notification)
+                    print(f"[DEBUG] Notification data prepared: {notification_data}")
                     
                     group_name = f'notifications_{member.id}'
+                    print(f"[DEBUG] Sending notification to group: {group_name}")
                     await self.channel_layer.group_send(
                         group_name,
                         {
@@ -162,10 +174,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
                             'notification': notification_data
                         }
                     )
+                    print(f"[DEBUG] Notification sent to group: {group_name}")
+                else:
+                    print(f"[DEBUG] Skipping sender (member ID == sender ID)")
         except Exception as e:
             # Log error but don't crash chat functionality
             import traceback
-            print(f"Error sending notifications: {str(e)}")
+            print(f"[ERROR] Error sending notifications: {str(e)}")
             print(traceback.format_exc())
     
     @database_sync_to_async
@@ -209,17 +224,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
 class NotificationConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.user = self.scope['user']
+        print(f"[DEBUG] NotificationConsumer.connect - User ID: {self.user.id}, Is Anonymous: {self.user.is_anonymous}")
         
         if self.user.is_anonymous:
+            print(f"[DEBUG] User is anonymous, closing connection")
             await self.close()
             return
         
         self.notification_group_name = f'notifications_{self.user.id}'
+        print(f"[DEBUG] Notification group name: {self.notification_group_name}")
+        print(f"[DEBUG] Channel name: {self.channel_name}")
         
         await self.channel_layer.group_add(
             self.notification_group_name,
             self.channel_name
         )
+        print(f"[DEBUG] Added to notification group: {self.notification_group_name}")
         
         await self.accept()
         
@@ -227,6 +247,7 @@ class NotificationConsumer(AsyncWebsocketConsumer):
             'type': 'connection_established',
             'message': 'Connected to notifications'
         }, ensure_ascii=False))
+        print(f"[DEBUG] NotificationConsumer connection established for user ID: {self.user.id}")
     
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(
@@ -236,12 +257,18 @@ class NotificationConsumer(AsyncWebsocketConsumer):
     
     async def notification(self, event):
         try:
+            print(f"[DEBUG] NotificationConsumer.notification called - User ID: {self.user.id}")
+            print(f"[DEBUG] Event received: {event}")
             notification = event['notification']
+            print(f"[DEBUG] Notification data: {notification}")
             
             await self.send(text_data=json.dumps({
                 'type': 'notification',
                 'notification': notification
             }, ensure_ascii=False))
+            print(f"[DEBUG] Notification sent to WebSocket for user ID: {self.user.id}")
         except Exception as e:
             # Log error but don't crash
-            print(f"Error sending notification: {str(e)}")
+            import traceback
+            print(f"[ERROR] Error sending notification: {str(e)}")
+            print(traceback.format_exc())
