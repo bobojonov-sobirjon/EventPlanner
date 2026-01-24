@@ -28,11 +28,11 @@ class ChatRoom(models.Model):
     
     class Meta:
         verbose_name = _("Чат комната")
-        verbose_name_plural = _("Чат комнаты")
+        verbose_name_plural = _("01. Чат комнаты")
         ordering = ['-created_at']
     
     def __str__(self):
-        return f"Chat Room для плана {self.plan.id} - {self.channel_name}"
+        return f"{self.id} - Чат для плана {self.plan.id} - {self.plan.name} - {self.channel_name}"
     
     def save(self, *args, **kwargs):
         if not self.channel_name:
@@ -57,7 +57,7 @@ class ChatRoomGroup(models.Model):
     
     class Meta:
         verbose_name = _("Участник чат комнаты")
-        verbose_name_plural = _("Участники чат комнат")
+        verbose_name_plural = _("02. Участники чат комнат")
         unique_together = ['user', 'room']
         ordering = ['-created_at']
     

@@ -1,11 +1,10 @@
 from rest_framework import serializers
 from django.conf import settings
-from .models import Plan, GenerateTokenPlan, PlanUser
+from .models import Plan, PlanUser, GenerateTokenPlan
 
 
 class PlanSerializer(serializers.ModelSerializer):
     user = serializers.SerializerMethodField()
-    tokens = serializers.SerializerMethodField()
     plan_users = serializers.SerializerMethodField()
     count_user = serializers.SerializerMethodField()
     
@@ -13,16 +12,13 @@ class PlanSerializer(serializers.ModelSerializer):
         model = Plan
         fields = (
             'id', 'emoji', 'name', 'location', 'lat', 'lng', 
-            'datetime', 'user', 'user_plan_number', 'tokens', 'plan_users', 'count_user', 'created_at', 'updated_at'
+            'datetime', 'user', 'user_plan_number', 'plan_users', 'count_user', 'created_at', 'updated_at'
         )
         read_only_fields = ('id', 'user', 'user_plan_number', 'created_at', 'updated_at')
     
     def get_user(self, obj):
         from apps.v1.accounts.serializers import CustomUserSerializer
         return CustomUserSerializer(obj.user).data
-    
-    def get_tokens(self, obj):
-        return GenerateTokenPlanSerializer(obj.tokens.all(), many=True).data
     
     def get_plan_users(self, obj):
         return PlanUserSerializer(obj.plan_users.all(), many=True).data
@@ -67,59 +63,25 @@ class PlanCreateSerializer(serializers.Serializer):
     )
 
 
-class GenerateTokenPlanSerializer(serializers.ModelSerializer):
-    link = serializers.SerializerMethodField()
-    msg = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = GenerateTokenPlan
-        fields = ('id', 'token', 'link', 'msg')
-        read_only_fields = ('id', 'token', 'link', 'msg')
-    
-    def get_link(self, obj):
-        bot_name = getattr(settings, 'BOT_NAME', None)
-        if bot_name:
-            return f"https://t.me/{bot_name}?start={obj.token}"
-        return None
-    
-    def get_msg(self, obj):
-        plan = obj.plan
-        creator = plan.user
-        
-        creator_name = creator.first_name or creator.last_name or creator.username or "Пользователь"
-        if creator.first_name and creator.last_name:
-            creator_name = f"{creator.first_name} {creator.last_name}".strip()
-        elif creator.first_name:
-            creator_name = creator.first_name
-        elif creator.last_name:
-            creator_name = creator.last_name
-        
-        plan_name = plan.name
-        plan_datetime = plan.datetime.strftime("%d.%m.%Y %H:%M")
-        
-        bot_name = getattr(settings, 'BOT_NAME', 'your_bot')
-        link = f"https://t.me/{bot_name}?start={obj.token}"
-        
-        msg = f"{creator_name} приглашает вас на план «{plan_name}» на {plan_datetime}. Присоединяйтесь: {link}"
-        
-        return msg
-
-
 class PlanUserSerializer(serializers.ModelSerializer):
     user = serializers.SerializerMethodField()
-    token = GenerateTokenPlanSerializer(read_only=True)
+    status = serializers.SerializerMethodField()
     
     class Meta:
         model = PlanUser
         fields = (
-            'id', 'plan', 'token', 'user', 'status', 
+            'id', 'plan', 'user', 'status', 
             'created_at', 'updated_at'
         )
-        read_only_fields = ('id', 'plan', 'token', 'user', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'plan', 'user', 'status', 'created_at', 'updated_at')
     
     def get_user(self, obj):
         from apps.v1.accounts.serializers import CustomUserSerializer
         return CustomUserSerializer(obj.user).data
+    
+    def get_status(self, obj):
+        """Возвращает русский перевод статуса вместо английского значения"""
+        return obj.get_status_display()
 
 
 class PlanUpdateSerializer(serializers.Serializer):
@@ -163,10 +125,6 @@ class PlanApproveRejectSerializer(serializers.Serializer):
         required=True,
         help_text="ID плана"
     )
-    token_id = serializers.CharField(
-        required=True,
-        help_text="ID токена (UUID string или integer ID)"
-    )
 
 
 class FriendSerializer(serializers.Serializer):
@@ -197,3 +155,30 @@ class PlanFriendsBulkTokenSerializer(serializers.Serializer):
         required=True,
         help_text="Список ID пользователей для генерации токенов"
     )
+
+
+class GenerateTokenPlanSerializer(serializers.ModelSerializer):
+    plan = serializers.SerializerMethodField()
+    created_by = serializers.SerializerMethodField()
+    is_valid = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = GenerateTokenPlan
+        fields = (
+            'id', 'token', 'plan', 'created_by', 'expires_at', 
+            'max_uses', 'current_uses', 'is_active', 'is_valid',
+            'created_at', 'updated_at'
+        )
+        read_only_fields = ('id', 'token', 'created_at', 'updated_at')
+    
+    def get_plan(self, obj):
+        from .serializers import PlanSerializer
+        return PlanSerializer(obj.plan).data
+    
+    def get_created_by(self, obj):
+        from apps.v1.accounts.serializers import CustomUserSerializer
+        return CustomUserSerializer(obj.created_by).data
+    
+    def get_is_valid(self, obj):
+        """Token hali ham amal qiladimi"""
+        return obj.is_valid()

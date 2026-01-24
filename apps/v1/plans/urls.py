@@ -10,7 +10,8 @@ from .views import (
     PlanDeleteAPIView,
     FriendsListAPIView,
     PlanFriendsAPIView,
-    PlanFriendsBulkTokenAPIView
+    PlanFriendsBulkTokenAPIView,
+    PlanTokenDetailAPIView
 )
 
 urlpatterns = [
@@ -24,4 +25,5 @@ urlpatterns = [
     path('approve/', PlanApproveAPIView.as_view(), name='plan-approve'),
     path('reject/', PlanRejectAPIView.as_view(), name='plan-reject'),
     path('<int:plan_id>/delete/', PlanDeleteAPIView.as_view(), name='plan-delete'),
+    path('token/<str:token>/', PlanTokenDetailAPIView.as_view(), name='plan-token-detail'),
 ]

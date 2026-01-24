@@ -2,10 +2,13 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
+from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, inline_serializer
+from drf_spectacular.types import OpenApiTypes
 from django.shortcuts import get_object_or_404
+from django.contrib.auth import get_user_model
 
 from .models import ChatRoom, ChatRoomGroup, ChatRoomMessage, Notification
+from apps.v1.plans.models import PlanUser
 from .serializers import (
     ChatRoomSerializer, ChatRoomDetailSerializer, ChatRoomMessageSerializer,
     NotificationSerializer
@@ -501,3 +504,110 @@ class NotificationDetailAPIView(APIView):
         
         serializer = NotificationSerializer(notification)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    tags=["Chat"],
+    summary="Удалить пользователя из чат комнаты",
+    description="""
+    Удаление пользователя из чат комнаты.
+
+    **Требуется аутентификация:** Да (JWT)
+
+    **Права доступа:**
+    - Только создатель плана может удалять пользователей
+    - Нельзя удалить самого себя
+
+    **URL параметры:**
+    - `room_id` — ID чат комнаты
+    - `user_id` — ID пользователя для удаления
+
+    **Пример запроса:**
+    ```
+    DELETE /api/v1/chat/rooms/1/remove-user/2/
+    ```
+
+    **Пример ответа:**
+    ```json
+    {
+        "message": "Пользователь успешно удален из чат комнаты.",
+        "room_id": 1,
+        "removed_user_id": 2,
+        "plan_id": 1
+    }
+    ```
+    """,
+    responses={
+        200: {"description": "Пользователь успешно удален"},
+        400: {"description": "Ошибка запроса"},
+        403: {"description": "Нет прав"},
+        404: {"description": "Чат комната не найдена"},
+        401: {"description": "Не авторизован"},
+    },
+)
+class RemoveUserFromRoomAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, room_id: int, user_id: int):
+        """
+        ChatRoomGroup dan userni o'chiradi
+        va PlanUser status ni REMOVED_INTO_CHAT_GROUP ga o'zgartiradi
+        """
+        User = get_user_model()
+
+        # Chat roomni topamiz
+        room = get_object_or_404(ChatRoom, id=room_id)
+
+        # Faqat plan creator o‘chira oladi
+        if room.plan.user != request.user:
+            return Response(
+                {"error": "Только создатель плана может удалять пользователей из чат комнаты."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # O'zini o‘chirish mumkin emas
+        if user_id == request.user.id:
+            return Response(
+                {"error": "Вы не можете удалить себя из комнаты."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Userni topamiz
+        user_to_remove = get_object_or_404(User, id=user_id)
+
+        # ChatRoomGroup mavjudligini tekshiramiz
+        chat_room_group = ChatRoomGroup.objects.filter(
+            room=room,
+            user=user_to_remove
+        ).first()
+
+        if not chat_room_group:
+            return Response(
+                {"error": "Пользователь не найден в этой чат комнате."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # PlanUser statusni yangilaymiz
+        plan = room.plan
+        plan_user, created = PlanUser.objects.get_or_create(
+            plan=plan,
+            user=user_to_remove,
+            defaults={"status": PlanUser.Status.REMOVED_INTO_CHAT_GROUP},
+        )
+
+        if not created:
+            plan_user.status = PlanUser.Status.REMOVED_INTO_CHAT_GROUP
+            plan_user.save(update_fields=["status", "updated_at"])
+
+        # ChatRoomGroup dan o‘chiramiz
+        chat_room_group.delete()
+
+        return Response(
+            {
+                "message": "Пользователь успешно удален из чат комнаты.",
+                "room_id": room_id,
+                "removed_user_id": user_id,
+                "plan_id": plan.id,
+            },
+            status=status.HTTP_200_OK,
+        )

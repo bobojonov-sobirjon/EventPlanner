@@ -1,5 +1,7 @@
 import uuid
 import requests
+import json
+import base64
 from datetime import datetime, timedelta
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -12,10 +14,10 @@ from django.conf import settings
 
 from .serializers import (
     PlanSerializer, PlanCreateSerializer, PlanUpdateSerializer,
-    PlanApproveRejectSerializer, PlanUserSerializer, GenerateTokenPlanSerializer,
-    FriendSerializer, PlanFriendsBulkTokenSerializer
+    PlanApproveRejectSerializer, PlanUserSerializer,
+    FriendSerializer, PlanFriendsBulkTokenSerializer, GenerateTokenPlanSerializer
 )
-from .models import Plan, GenerateTokenPlan, PlanUser
+from .models import Plan, PlanUser, GenerateTokenPlan
 from apps.v1.chat.models import ChatRoom, ChatRoomGroup
 
 
@@ -26,9 +28,6 @@ from apps.v1.chat.models import ChatRoom, ChatRoomGroup
     Создание нового плана.
     
     **Требуется аутентификация:** Да (JWT токен в заголовке Authorization)
-    
-    При создании плана токен автоматически не генерируется.
-    Для генерации токена используйте отдельный endpoint: POST /api/v1/plans/<plan_id>/generate-token/
     
     **Пример запроса:**
     ```json
@@ -58,7 +57,6 @@ from apps.v1.chat.models import ChatRoom, ChatRoomGroup
             "last_name": "Иванов",
             ...
         },
-        "tokens": [],
         "plan_users": [],
         "created_at": "2025-01-01T12:00:00Z",
         "updated_at": "2025-01-01T12:00:00Z"
@@ -104,6 +102,19 @@ class PlanCreateAPIView(APIView):
             user=request.user,
             **serializer.validated_data
         )
+        
+        # Creator uchun PlanUser yaratish (status APPROVED)
+        plan_user, created = PlanUser.objects.get_or_create(
+            plan=plan,
+            user=request.user,
+            defaults={
+                'status': PlanUser.Status.APPROVED
+            }
+        )
+        # Agar allaqachon mavjud bo'lsa va creator bo'lsa, status'ni APPROVED qilish
+        if not created and plan.user == request.user:
+            plan_user.status = PlanUser.Status.APPROVED
+            plan_user.save(update_fields=['status', 'updated_at'])
         
         chat_room = ChatRoom.objects.create(
             plan=plan,
@@ -154,7 +165,6 @@ class PlanCreateAPIView(APIView):
                 "location": "Додо Пицца, Тверская 10",
                 "datetime": "2025-12-27T19:00:00Z",
                 "user": {...},
-                "tokens": [...],
                 "plan_users": [...],
                 "count_user": 3
             }
@@ -167,7 +177,6 @@ class PlanCreateAPIView(APIView):
                 "location": "Кинотеатр",
                 "datetime": "2025-12-28T20:00:00Z",
                 "user": {...},
-                "tokens": [...],
                 "plan_users": [...],
                 "count_user": 2
             }
@@ -250,58 +259,46 @@ class PlanListAPIView(APIView):
             plan_users__status=PlanUser.Status.PENDING
         ).distinct()
         
-        if date:
-            try:
-                date_obj = datetime.strptime(date, '%Y-%m-%d')
-                start_of_day = date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
-                end_of_day = date_obj.replace(hour=23, minute=59, second=59, microsecond=999999)
-                approved_and_yours_plans = approved_and_yours_plans.filter(
-                    datetime__gte=start_of_day,
-                    datetime__lte=end_of_day
-                )
-                pending_plans = pending_plans.filter(
-                    datetime__gte=start_of_day,
-                    datetime__lte=end_of_day
-                )
-            except ValueError:
-                pass
-        elif filter_type == 'new':
+        # Filter type ustuvor bo'lishi kerak
+        if filter_type == 'new':
+            # "new" filter: oxirgi 2 kun ichida yaratilgan planlar (date parametri e'tiborga olinmaydi)
             two_days_ago = datetime.now() - timedelta(days=2)
             approved_and_yours_plans = approved_and_yours_plans.filter(created_at__gte=two_days_ago)
             pending_plans = pending_plans.filter(created_at__gte=two_days_ago)
-        elif filter_type == 'date':
-            if start_date:
+        elif filter_type == 'date' or (not filter_type and (date or start_date or end_date)):
+            # "date" filter yoki filter_type bo'lmasa ham date parametrlar mavjud bo'lsa
+            if date:
                 try:
-                    start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
-                    approved_and_yours_plans = approved_and_yours_plans.filter(datetime__gte=start_datetime)
-                    pending_plans = pending_plans.filter(datetime__gte=start_datetime)
+                    date_obj = datetime.strptime(date, '%Y-%m-%d')
+                    start_of_day = date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
+                    end_of_day = date_obj.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    approved_and_yours_plans = approved_and_yours_plans.filter(
+                        datetime__gte=start_of_day,
+                        datetime__lte=end_of_day
+                    )
+                    pending_plans = pending_plans.filter(
+                        datetime__gte=start_of_day,
+                        datetime__lte=end_of_day
+                    )
                 except ValueError:
                     pass
-            if end_date:
-                try:
-                    end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
-                    end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
-                    approved_and_yours_plans = approved_and_yours_plans.filter(datetime__lte=end_datetime)
-                    pending_plans = pending_plans.filter(datetime__lte=end_datetime)
-                except ValueError:
-                    pass
-        
-        if start_date and not filter_type and not date:
-            try:
-                start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
-                approved_and_yours_plans = approved_and_yours_plans.filter(datetime__gte=start_datetime)
-                pending_plans = pending_plans.filter(datetime__gte=start_datetime)
-            except ValueError:
-                pass
-        
-        if end_date and not filter_type and not date:
-            try:
-                end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
-                end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
-                approved_and_yours_plans = approved_and_yours_plans.filter(datetime__lte=end_datetime)
-                pending_plans = pending_plans.filter(datetime__lte=end_datetime)
-            except ValueError:
-                pass
+            else:
+                # start_date va end_date ishlatish
+                if start_date:
+                    try:
+                        start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
+                        approved_and_yours_plans = approved_and_yours_plans.filter(datetime__gte=start_datetime)
+                        pending_plans = pending_plans.filter(datetime__gte=start_datetime)
+                    except ValueError:
+                        pass
+                if end_date:
+                    try:
+                        end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
+                        end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
+                        approved_and_yours_plans = approved_and_yours_plans.filter(datetime__lte=end_datetime)
+                        pending_plans = pending_plans.filter(datetime__lte=end_datetime)
+                    except ValueError:
+                        pass
         
         approved_serializer = PlanSerializer(approved_and_yours_plans, many=True)
         pending_serializer = PlanSerializer(pending_plans, many=True)
@@ -373,16 +370,15 @@ class PlanDetailAPIView(APIView):
 
 
 @extend_schema(
-    tags=['Plan Tokens'],
+    tags=['Generate Token Plans'],
     summary="Сгенерировать токен для плана",
     description="""
-    Генерация нового токена для приглашения друзей на план.
+    Генерация invite-ссылки для плана.
     
     **Требуется аутентификация:** Да (JWT токен в заголовке Authorization)
     
-    Этот endpoint используется для создания invite-ссылки для каждого друга отдельно.
-    Каждый вызов создает новый уникальный токен для одного плана.
-    Один план может иметь множество токенов (для разных друзей).
+    Этот endpoint используется для создания invite-ссылки для плана.
+    Пользователь автоматически добавляется в PlanUser со статусом PENDING.
     
     **Пример запроса:**
     ```
@@ -392,23 +388,21 @@ class PlanDetailAPIView(APIView):
     **Пример ответа:**
     ```json
     {
-        "id": 1,
-        "token": "550e8400-e29b-41d4-a716-446655440000",
-        "link": "https://t.me/your_bot?start=550e8400-e29b-41d4-a716-446655440000",
-        "msg": "Иван приглашает вас на план «Пицца с Аней» на 27.12.2025 19:00. Присоединяйтесь: https://t.me/your_bot?start=550e8400-e29b-41d4-a716-446655440000"
+        "plan_id": 1,
+        "link": "https://t.me/your_bot?start=1",
+        "msg": "Иван приглашает вас на план «Пицца с Аней» на 27.12.2025 19:00. Присоединяйтесь: https://t.me/your_bot?start=1"
     }
     ```
     """,
     responses={
         201: {
-            'description': 'Токен успешно сгенерирован.',
+            'description': 'Ссылка успешно создана.',
             'content': {
                 'application/json': {
                     'example': {
-                        'id': 1,
-                        'token': '550e8400-e29b-41d4-a716-446655440000',
-                        'link': 'https://t.me/your_bot?start=550e8400-e29b-41d4-a716-446655440000',
-                        'msg': 'Иван приглашает вас на план «Пицца с Аней» на 27.12.2025 19:00. Присоединяйтесь: https://t.me/your_bot?start=550e8400-e29b-41d4-a716-446655440000'
+                        'plan_id': 1,
+                        'link': 'https://t.me/your_bot?start=1',
+                        'msg': 'Иван приглашает вас на план «Пицца с Аней» на 27.12.2025 19:00. Присоединяйтесь: https://t.me/your_bot?start=1'
                     }
                 }
             }
@@ -449,6 +443,11 @@ class PlanGenerateTokenAPIView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request, plan_id):
+        from .models import GenerateTokenPlan
+        from datetime import timedelta
+        from django.utils import timezone
+        import uuid
+        
         plan = get_object_or_404(Plan, id=plan_id)
         
         if plan.user != request.user:
@@ -457,15 +456,62 @@ class PlanGenerateTokenAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        token = GenerateTokenPlan.objects.create(
+        # Request user ni PlanUser ga qo'shish
+        # Agar creator bo'lsa APPROVED, aks holda PENDING
+        plan_user, created = PlanUser.objects.get_or_create(
             plan=plan,
-            token=str(uuid.uuid4())
+            user=request.user,
+            defaults={
+                'status': PlanUser.Status.APPROVED if plan.user == request.user else PlanUser.Status.PENDING
+            }
+        )
+        # Agar allaqachon mavjud bo'lsa va creator bo'lsa, status'ni APPROVED qilish
+        if not created and plan.user == request.user:
+            plan_user.status = PlanUser.Status.APPROVED
+            plan_user.save(update_fields=['status', 'updated_at'])
+        
+        # Xavfsiz token yaratish
+        # Max uses va expiration sozlamalari (default: 10 ta foydalanish, 30 kun muddat)
+        max_uses = request.data.get('max_uses', 10)
+        expires_days = request.data.get('expires_days', 30)
+        
+        # Token yaratish
+        token_id = uuid.uuid4()
+        token_str = str(token_id).replace('-', '')[:32]  # 32 ta belgi
+        
+        expires_at = timezone.now() + timedelta(days=expires_days) if expires_days > 0 else None
+        
+        token_obj = GenerateTokenPlan.objects.create(
+            id=token_id,
+            token=token_str,
+            plan=plan,
+            created_by=request.user,
+            expires_at=expires_at,
+            max_uses=max_uses,
+            is_active=True
         )
         
-        return Response(
-            GenerateTokenPlanSerializer(token).data,
-            status=status.HTTP_201_CREATED
-        )
+        bot_name = getattr(settings, 'BOT_NAME', 'your_bot')
+        # Link yaratish: token ishlatamiz, plan_id emas
+        link = f"https://t.me/{bot_name}?start={token_str}"
+        
+        # Получаем данные отправителя
+        sender_name = f"{request.user.first_name or ''} {request.user.last_name or ''}".strip()
+        if not sender_name:
+            sender_name = request.user.username or f"User {request.user.id}"
+        
+        # Форматируем дату плана
+        plan_datetime = plan.datetime.strftime('%d.%m.%Y %H:%M')
+        msg = f"{sender_name} приглашает вас на план «{plan.name}» на {plan_datetime}. Присоединяйтесь: {link}"
+        
+        return Response({
+            'plan_id': plan_id,
+            'token': token_str,
+            'link': link,
+            'msg': msg,
+            'expires_at': expires_at.isoformat() if expires_at else None,
+            'max_uses': max_uses
+        }, status=status.HTTP_201_CREATED)
 
 
 @extend_schema(
@@ -573,18 +619,17 @@ class PlanUpdateAPIView(APIView):
     tags=['Plan Invitations'],
     summary="Принять приглашение на план",
     description="""
-    Принятие приглашения на план по токену.
+    Принятие приглашения на план.
     
     **Требуется аутентификация:** Да (JWT токен в заголовке Authorization)
     
-    Когда пользователь переходит по invite-ссылке и нажимает "Принять",
+    Когда пользователь нажимает "Принять",
     создается или обновляется запись PlanUser со статусом "approved".
     
     **Пример запроса:**
     ```json
     {
-        "plan_id": 1,
-        "token_id": 1
+        "plan_id": 1
     }
     ```
     
@@ -593,7 +638,6 @@ class PlanUpdateAPIView(APIView):
     {
         "id": 1,
         "plan": 1,
-        "token": {...},
         "user": {...},
         "status": "approved",
         "created_at": "2025-01-01T12:00:00Z",
@@ -608,11 +652,11 @@ class PlanUpdateAPIView(APIView):
             description='Приглашение успешно принято.'
         ),
         400: {
-            'description': 'Ошибка валидации или план/токен не найден.',
+            'description': 'Ошибка валидации или план не найден.',
             'content': {
                 'application/json': {
                     'example': {
-                        'error': 'План или токен не найден.'
+                        'error': 'План не найден.'
                     }
                 }
             }
@@ -637,40 +681,33 @@ class PlanApproveAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         
         plan_id = serializer.validated_data['plan_id']
-        token_id = serializer.validated_data['token_id']
         
         try:
             plan = Plan.objects.get(id=plan_id)
-            try:
-                if token_id.isdigit():
-                    token = GenerateTokenPlan.objects.get(id=int(token_id), plan=plan)
-                else:
-                    token = GenerateTokenPlan.objects.get(token=token_id, plan=plan)
-            except (GenerateTokenPlan.DoesNotExist, ValueError):
-                return Response(
-                    {'error': 'Токен не найден.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
         except Plan.DoesNotExist:
             return Response(
                 {'error': 'План не найден.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # PlanUser ni topamiz yoki yaratamiz
         plan_user, created = PlanUser.objects.update_or_create(
             plan=plan,
-            token=token,
             user=request.user,
-            defaults={'status': PlanUser.Status.APPROVED}
+            defaults={
+                'status': PlanUser.Status.APPROVED
+            }
         )
         
         try:
             chat_room = ChatRoom.objects.get(plan=plan)
-            ChatRoomGroup.objects.get_or_create(
+            chat_group, created_group = ChatRoomGroup.objects.get_or_create(
                 user=request.user,
                 room=chat_room
             )
+            print(f"[DEBUG] PlanApprove - User ID: {request.user.id} added to ChatRoomGroup for room {chat_room.id}, created: {created_group}")
         except ChatRoom.DoesNotExist:
+            print(f"[DEBUG] PlanApprove - ChatRoom not found for plan {plan.id}")
             pass
         
         return Response(PlanUserSerializer(plan_user).data, status=status.HTTP_200_OK)
@@ -680,18 +717,17 @@ class PlanApproveAPIView(APIView):
     tags=['Plan Invitations'],
     summary="Отклонить приглашение на план",
     description="""
-    Отклонение приглашения на план по токену.
+    Отклонение приглашения на план.
     
     **Требуется аутентификация:** Да (JWT токен в заголовке Authorization)
     
-    Когда пользователь переходит по invite-ссылке и нажимает "Отклонить",
+    Когда пользователь нажимает "Отклонить",
     создается или обновляется запись PlanUser со статусом "rejected".
     
     **Пример запроса:**
     ```json
     {
-        "plan_id": 1,
-        "token_id": 1
+        "plan_id": 1
     }
     ```
     
@@ -700,7 +736,6 @@ class PlanApproveAPIView(APIView):
     {
         "id": 1,
         "plan": 1,
-        "token": {...},
         "user": {...},
         "status": "rejected",
         "created_at": "2025-01-01T12:00:00Z",
@@ -715,11 +750,11 @@ class PlanApproveAPIView(APIView):
             description='Приглашение успешно отклонено.'
         ),
         400: {
-            'description': 'Ошибка валидации или план/токен не найден.',
+            'description': 'Ошибка валидации или план не найден.',
             'content': {
                 'application/json': {
                     'example': {
-                        'error': 'План или токен не найден.'
+                        'error': 'План не найден.'
                     }
                 }
             }
@@ -744,40 +779,33 @@ class PlanRejectAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         
         plan_id = serializer.validated_data['plan_id']
-        token_id = serializer.validated_data['token_id']
         
         try:
             plan = Plan.objects.get(id=plan_id)
-            try:
-                if token_id.isdigit():
-                    token = GenerateTokenPlan.objects.get(id=int(token_id), plan=plan)
-                else:
-                    token = GenerateTokenPlan.objects.get(token=token_id, plan=plan)
-            except (GenerateTokenPlan.DoesNotExist, ValueError):
-                return Response(
-                    {'error': 'Токен не найден.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
         except Plan.DoesNotExist:
             return Response(
                 {'error': 'План не найден.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # PlanUser ni topamiz yoki yaratamiz
         plan_user, created = PlanUser.objects.update_or_create(
             plan=plan,
-            token=token,
             user=request.user,
-            defaults={'status': PlanUser.Status.REJECTED}
+            defaults={
+                'status': PlanUser.Status.REJECTED
+            }
         )
         
         try:
             chat_room = ChatRoom.objects.get(plan=plan)
-            ChatRoomGroup.objects.get_or_create(
+            chat_group, created_group = ChatRoomGroup.objects.get_or_create(
                 user=request.user,
                 room=chat_room
             )
+            print(f"[DEBUG] PlanReject - User ID: {request.user.id} added to ChatRoomGroup for room {chat_room.id}, created: {created_group}")
         except ChatRoom.DoesNotExist:
+            print(f"[DEBUG] PlanReject - ChatRoom not found for plan {plan.id}")
             pass
         
         return Response(PlanUserSerializer(plan_user).data, status=status.HTTP_200_OK)
@@ -1055,15 +1083,16 @@ class PlanFriendsAPIView(APIView):
 
 
 @extend_schema(
-    tags=['Plan Tokens'],
-    summary="Сгенерировать токены для друзей",
+    tags=['Generate Token Plans'],
+    summary="Отправить приглашения друзьям",
     description="""
-    Генерация токенов для нескольких друзей одновременно.
+    Отправка приглашений на план нескольким друзьям одновременно через Telegram.
     
     **Требуется аутентификация:** Да (JWT токен в заголовке Authorization)
     
-    Этот endpoint позволяет создать токены для нескольких друзей сразу.
-    Для каждого пользователя из списка создается отдельный уникальный токен.
+    Этот endpoint отправляет приглашения выбранным пользователям через Telegram.
+    Ссылка создается с plan_id: `https://t.me/{bot_name}?start={plan_id}`
+    Все пользователи автоматически добавляются в PlanUser со статусом PENDING.
     
     **Пример запроса:**
     ```json
@@ -1075,31 +1104,26 @@ class PlanFriendsAPIView(APIView):
     **Пример ответа:**
     ```json
     {
-        "tokens": [
-            {
-                "id": 4,
-                "token": "cf74dc85-9b08-4e20-8027-074f50c84b0c",
-                "link": "https://t.me/event_planner_mini_bot?start=cf74dc85-9b08-4e20-8027-074f50c84b0c",
-                "msg": "Sobirjon Bobojonov приглашает вас на план «Пицца с Аней» на 27.12.2025 16:00. Присоединяйтесь: https://t.me/event_planner_mini_bot?start=cf74dc85-9b08-4e20-8027-074f50c84b0c"
-            },
-            {
-                "id": 5,
-                "token": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                "link": "https://t.me/event_planner_mini_bot?start=a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                "msg": "Sobirjon Bobojonov приглашает вас на план «Пицца с Аней» на 27.12.2025 16:00. Присоединяйтесь: https://t.me/event_planner_mini_bot?start=a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-            }
-        ]
+        "message": "Приглашения отправлены 3 пользователям.",
+        "sent_count": 3,
+        "total_users": 3,
+        "link": "https://t.me/event_planner_mini_bot?start=1",
+        "errors": null
     }
     ```
     """,
     request=PlanFriendsBulkTokenSerializer,
     responses={
-        201: {
-            'description': 'Токены успешно сгенерированы.',
+        200: {
+            'description': 'Приглашения успешно отправлены.',
             'content': {
                 'application/json': {
                     'example': {
-                        'tokens': []
+                        'message': 'Приглашения отправлены 3 пользователям.',
+                        'sent_count': 3,
+                        'total_users': 3,
+                        'link': 'https://t.me/event_planner_mini_bot?start=1',
+                        'errors': None
                     }
                 }
             }
@@ -1173,37 +1197,179 @@ class PlanFriendsBulkTokenAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        tokens = []
         bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
         bot_name = getattr(settings, 'BOT_NAME', 'your_bot')
         
-        for user in users:
-            token = GenerateTokenPlan.objects.create(
-                plan=plan,
-                token=str(uuid.uuid4())
-            )
-            tokens.append(token)
-            
-            if user.tg_id and bot_token:
-                try:
-                    token_link = f"https://t.me/{bot_name}?start={token.token}"
-                    message = GenerateTokenPlanSerializer(token).data.get('msg', '')
-                    
-                    telegram_api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-                    payload = {
-                        'chat_id': user.tg_id,
-                        'text': message,
-                        'parse_mode': 'HTML'
-                    }
-                    
-                    response = requests.post(telegram_api_url, json=payload, timeout=5)
-                    if response.status_code != 200:
-                        pass
-                except Exception as e:
-                    pass
+        # Получаем данные отправителя
+        sender_name = f"{request.user.first_name or ''} {request.user.last_name or ''}".strip()
+        if not sender_name:
+            sender_name = request.user.username or f"User {request.user.id}"
         
-        token_serializer = GenerateTokenPlanSerializer(tokens, many=True)
+        # Форматируем дату плана
+        plan_datetime = plan.datetime.strftime('%d.%m.%Y %H:%M')
+        
+        # Xavfsiz token yaratish (bulk invite uchun - ko'p foydalanish mumkin)
+        from .models import GenerateTokenPlan
+        from datetime import timedelta
+        from django.utils import timezone
+        import uuid
+        
+        # Bulk invite uchun max_uses = userlar soni + bir nechta qo'shimcha
+        max_uses = len(user_ids) + 5  # 5 ta qo'shimcha imkoniyat
+        expires_days = 30
+        
+        token_id = uuid.uuid4()
+        token_str = str(token_id).replace('-', '')[:32]
+        expires_at = timezone.now() + timedelta(days=expires_days)
+        
+        token_obj = GenerateTokenPlan.objects.create(
+            id=token_id,
+            token=token_str,
+            plan=plan,
+            created_by=request.user,
+            expires_at=expires_at,
+            max_uses=max_uses,
+            is_active=True
+        )
+        
+        # Barcha userlarni PlanUser ga qo'shish
+        # Creator uchun APPROVED, boshqalar uchun PENDING
+        for user in users:
+            plan_user, created = PlanUser.objects.get_or_create(
+                plan=plan,
+                user=user,
+                defaults={
+                    'status': PlanUser.Status.APPROVED if plan.user == user else PlanUser.Status.PENDING
+                }
+            )
+            # Agar allaqachon mavjud bo'lsa va creator bo'lsa, status'ni APPROVED qilish
+            if not created and plan.user == user:
+                plan_user.status = PlanUser.Status.APPROVED
+                plan_user.save(update_fields=['status', 'updated_at'])
+        
+        # Link yaratish: token ishlatamiz
+        invite_link = f"https://t.me/{bot_name}?start={token_str}"
+        
+        # Формируем сообщение
+        message_text = f"{sender_name} приглашает вас на план «{plan.name}» на {plan_datetime}. Присоединяйтесь: {invite_link}"
+        
+        sent_count = 0
+        errors = []
+        
+        # Bot API orqali xabar yuborish (eng oddiy usul)
+        if request.user.tg_id and bot_token:
+            for user in users:
+                if user.tg_id:
+                    try:
+                        telegram_api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                        payload = {
+                            'chat_id': user.tg_id,
+                            'text': message_text,
+                            'parse_mode': 'HTML'
+                        }
+                        
+                        response = requests.post(telegram_api_url, json=payload, timeout=5)
+                        if response.status_code == 200:
+                            sent_count += 1
+                        else:
+                            errors.append(f"User {user.id}: {response.status_code}")
+                    except Exception as e:
+                        errors.append(f"User {user.id}: {str(e)}")
+        else:
+            return Response(
+                {'error': 'У вас нет Telegram ID или бот токен не настроен.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         return Response({
-            'tokens': token_serializer.data
-        }, status=status.HTTP_201_CREATED)
+            'message': f'Приглашения отправлены {sent_count} пользователям.',
+            'sent_count': sent_count,
+            'total_users': len(users),
+            'link': invite_link,
+            'errors': errors if errors else None
+        }, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    tags=['Plans'],
+    summary="Получить информацию о токене приглашения",
+    description="""
+    Получение информации о токене приглашения по токену.
+    
+    **Требуется аутентификация:** Нет (публичный endpoint)
+    
+    Этот endpoint используется для получения информации о токене приглашения.
+    Можно использовать для проверки валидности токена перед использованием.
+    
+    **Пример запроса:**
+    ```
+    GET /api/v1/plans/token/a1b2c3d4e5f6.../
+    ```
+    
+    **Пример ответа:**
+    ```json
+    {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "token": "a1b2c3d4e5f6...",
+        "plan": {
+            "id": 1,
+            "name": "Пицца с Аней",
+            ...
+        },
+        "created_by": {
+            "id": 1,
+            "username": "user1",
+            ...
+        },
+        "expires_at": "2025-02-23T16:35:00Z",
+        "max_uses": 10,
+        "current_uses": 3,
+        "is_active": true,
+        "is_valid": true,
+        "created_at": "2025-01-24T16:35:00Z",
+        "updated_at": "2025-01-24T16:35:00Z"
+    }
+    ```
+    """,
+    parameters=[
+        OpenApiParameter(
+            name='token',
+            type=str,
+            location=OpenApiParameter.PATH,
+            description='Токен приглашения',
+            required=True
+        )
+    ],
+    responses={
+        200: OpenApiResponse(
+            response=GenerateTokenPlanSerializer,
+            description='Информация о токене успешно получена.'
+        ),
+        404: {
+            'description': 'Токен не найден.',
+            'content': {
+                'application/json': {
+                    'example': {
+                        'error': 'Токен не найден.'
+                    }
+                }
+            }
+        }
+    }
+)
+class PlanTokenDetailAPIView(APIView):
+    permission_classes = []  # Публичный endpoint
+    
+    def get(self, request, token):
+        """
+        Token bo'yicha GenerateTokenPlan ma'lumotlarini qaytaradi
+        """
+        try:
+            token_obj = GenerateTokenPlan.objects.get(token=token)
+            serializer = GenerateTokenPlanSerializer(token_obj)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except GenerateTokenPlan.DoesNotExist:
+            return Response(
+                {'error': 'Токен не найден.'},
+                status=status.HTTP_404_NOT_FOUND
+            )

@@ -6,6 +6,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from drf_spectacular.utils import extend_schema, OpenApiResponse
+from django.utils import timezone
 
 from .models import CustomUser
 from .serializers import (
@@ -167,25 +168,44 @@ class TelegramAuthAPIView(APIView):
                 try:
                     token_obj = GenerateTokenPlan.objects.get(token=invite_token)
                     
-                    if token_obj.is_activated:
+                    # Token hali ham amal qiladimi tekshirish
+                    if not token_obj.can_be_used():
+                        if not token_obj.is_active:
+                            error_msg = 'Этот токен приглашения деактивирован.'
+                        elif token_obj.expires_at and timezone.now() > token_obj.expires_at:
+                            error_msg = 'Срок действия этого токена приглашения истек.'
+                        elif token_obj.current_uses >= token_obj.max_uses:
+                            error_msg = 'Этот токен приглашения достиг максимального количества использований.'
+                        else:
+                            error_msg = 'Этот токен приглашения недействителен.'
+                        
                         return Response(
-                            {'error': 'Этот токен приглашения уже использован.'},
+                            {'error': error_msg},
                             status=status.HTTP_400_BAD_REQUEST
                         )
                     
                     plan = token_obj.plan
                     
-                    PlanUser.objects.get_or_create(
+                    # Foydalanuvchini planga qo'shish
+                    # Creator bo'lsa APPROVED, aks holda PENDING
+                    plan_user, created = PlanUser.objects.get_or_create(
                         plan=plan,
-                        token=token_obj,
                         user=user,
-                        defaults={'status': PlanUser.Status.PENDING}
+                        defaults={
+                            'status': PlanUser.Status.APPROVED if plan.user == user else PlanUser.Status.PENDING
+                        }
                     )
+                    # Agar allaqachon mavjud bo'lsa va creator bo'lsa, status'ni APPROVED qilish
+                    if not created and plan.user == user:
+                        plan_user.status = PlanUser.Status.APPROVED
+                        plan_user.save(update_fields=['status', 'updated_at'])
                     
-                    token_obj.is_activated = True
-                    token_obj.save()
+                    # Agar yangi qo'shilgan bo'lsa, tokenni ishlatish
+                    if created:
+                        token_obj.use_token()
                     
                 except GenerateTokenPlan.DoesNotExist:
+                    # Token topilmasa, xato qaytarmaymiz (faqat log qilamiz)
                     pass
 
             refresh = RefreshToken.for_user(user)

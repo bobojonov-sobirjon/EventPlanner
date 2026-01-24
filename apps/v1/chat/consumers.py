@@ -186,7 +186,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def get_room_members(self, room):
         members = ChatRoomGroup.objects.filter(room=room).select_related('user')
-        return [member.user for member in members]
+        member_list = [member.user for member in members]
+        member_ids = [m.id for m in member_list]
+        print(f"[DEBUG] ChatRoomGroup members for room {room.id}: {member_ids}")
+        return member_list
     
     @database_sync_to_async
     def get_plan_name(self, room):
