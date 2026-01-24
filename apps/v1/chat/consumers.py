@@ -132,41 +132,41 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
     
     async def send_notifications(self, room, sender, chat_message):
-        members = await self.get_room_members(room)
-        plan_name = await self.get_plan_name(room)
-        
-        for member in members:
-            if member.id != sender.id:
-                notification = await self.create_notification(
-                    user=member,
-                    notification_type='chat_message',
-                    title=f'Новое сообщение в плане "{plan_name}"',
-                    message=chat_message.message,
-                    data={
-                        'room_id': room.id,
-                        'message_id': chat_message.id,
-                        'sender_id': sender.id,
-                        'plan_id': room.plan.id
-                    }
-                )
-                
-                notification_data = {
-                    'id': notification.id,
-                    'notification_type': notification.notification_type,
-                    'title': notification.title,
-                    'message': notification.message,
-                    'data': notification.data,
-                    'is_read': notification.is_read,
-                    'created_at': notification.created_at.isoformat(),
-                }
-                
-                await self.channel_layer.group_send(
-                    f'notifications_{member.id}',
-                    {
-                        'type': 'notification',
-                        'notification': notification_data
-                    }
-                )
+        try:
+            members = await self.get_room_members(room)
+            plan_name = await self.get_plan_name(room)
+            plan_id = await self.get_plan_id(room)
+            
+            for member in members:
+                if member.id != sender.id:
+                    notification = await self.create_notification(
+                        user=member,
+                        notification_type='chat_message',
+                        title=f'Новое сообщение в плане "{plan_name}"',
+                        message=chat_message.message,
+                        data={
+                            'room_id': room.id,
+                            'message_id': chat_message.id,
+                            'sender_id': sender.id,
+                            'plan_id': plan_id
+                        }
+                    )
+                    
+                    notification_data = await self.get_notification_data(notification)
+                    
+                    group_name = f'notifications_{member.id}'
+                    await self.channel_layer.group_send(
+                        group_name,
+                        {
+                            'type': 'notification',
+                            'notification': notification_data
+                        }
+                    )
+        except Exception as e:
+            # Log error but don't crash chat functionality
+            import traceback
+            print(f"Error sending notifications: {str(e)}")
+            print(traceback.format_exc())
     
     @database_sync_to_async
     def get_room_members(self, room):
@@ -178,6 +178,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
         return room.plan.name
     
     @database_sync_to_async
+    def get_plan_id(self, room):
+        return room.plan.id
+    
+    @database_sync_to_async
     def create_notification(self, user, notification_type, title, message, data):
         return Notification.objects.create(
             user=user,
@@ -186,6 +190,20 @@ class ChatConsumer(AsyncWebsocketConsumer):
             message=message,
             data=data
         )
+    
+    @database_sync_to_async
+    def get_notification_data(self, notification):
+        # Refresh from database to ensure all fields are loaded
+        notification.refresh_from_db()
+        return {
+            'id': notification.id,
+            'notification_type': notification.notification_type,
+            'title': notification.title,
+            'message': notification.message,
+            'data': notification.data if isinstance(notification.data, dict) else {},
+            'is_read': notification.is_read,
+            'created_at': notification.created_at.isoformat(),
+        }
 
 
 class NotificationConsumer(AsyncWebsocketConsumer):
@@ -217,9 +235,13 @@ class NotificationConsumer(AsyncWebsocketConsumer):
         )
     
     async def notification(self, event):
-        notification = event['notification']
-        
-        await self.send(text_data=json.dumps({
-            'type': 'notification',
-            'notification': notification
-        }, ensure_ascii=False))
+        try:
+            notification = event['notification']
+            
+            await self.send(text_data=json.dumps({
+                'type': 'notification',
+                'notification': notification
+            }, ensure_ascii=False))
+        except Exception as e:
+            # Log error but don't crash
+            print(f"Error sending notification: {str(e)}")
