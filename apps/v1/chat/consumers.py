@@ -12,7 +12,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         self.room_id = self.scope['url_route']['kwargs']['room_id']
         self.room_group_name = f'chat_{self.room_id}'
         self.user = self.scope['user']
-        
+        self.user_id = getattr(self.user, 'id', None)  # sender_type taqqoslash uchun ishonchli id
         if self.user.is_anonymous:
             await self.close()
             return
@@ -102,9 +102,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
     
     async def chat_message(self, event):
         message = event['message'].copy()
-        # Har bir ulanish uchun: xabarni yuboruvchi (message['user']['id']) = initiator, qolganlar = receiver
+        # Har bir ulanish uchun: xabarni yuboruvchi = initiator, qolganlar = receiver (id ni int qilib taqqoslash)
         sender_id = message.get('user', {}).get('id')
-        if self.user and getattr(self.user, 'id', None) == sender_id:
+        try:
+            sender_id = int(sender_id) if sender_id is not None else None
+        except (TypeError, ValueError):
+            sender_id = None
+        if self.user_id is not None and sender_id is not None and self.user_id == sender_id:
             message['sender_type'] = 'initiator'
         else:
             message['sender_type'] = 'receiver'
