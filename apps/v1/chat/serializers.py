@@ -44,11 +44,8 @@ class ChatRoomMessageSerializer(serializers.ModelSerializer):
         return CustomUserSerializer(obj.user).data
     
     def get_sender_type(self, obj):
-        request = self.context.get('request')
-        if request and hasattr(request, 'user') and not request.user.is_anonymous:
-            if obj.user == request.user:
-                return 'initiator'
-        return 'receiver'
+        # Xabarni yuboruvchi (obj.user) har doim initiator, qabul qiluvchilar receiver
+        return 'initiator'
 
 
 class ChatRoomDetailSerializer(serializers.ModelSerializer):

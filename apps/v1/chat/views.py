@@ -245,7 +245,7 @@ class ChatRoomDetailAPIView(APIView):
                     "avatar": "https://example.com/avatar2.jpg"
                 },
                 "message": "В 19:00 будет удобно?",
-                "sender_type": "receiver",
+                "sender_type": "initiator",
                 "created_at": "2025-01-01T12:05:00Z",
                 "updated_at": "2025-01-01T12:05:00Z"
             }

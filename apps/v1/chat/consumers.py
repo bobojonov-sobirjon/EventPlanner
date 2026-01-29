@@ -63,8 +63,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             chat_message = await self.save_message(room, self.user, message)
             print(f"[DEBUG] Chat message saved - ID: {chat_message.id}, Room ID: {room.id}, User ID: {self.user.id}")
             
-            is_room_owner = await self.check_room_owner(room, self.user)
-            sender_type = 'initiator' if is_room_owner else 'receiver'
+            # Xabarni yuboruvchi har doim initiator, qabul qiluvchilar receiver
+            sender_type = 'initiator'
             
             await self.channel_layer.group_send(
                 self.room_group_name,
