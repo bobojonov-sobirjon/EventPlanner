@@ -2,6 +2,7 @@ import json
 import urllib.parse
 from rest_framework import status
 from rest_framework.views import APIView
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -14,6 +15,7 @@ from .serializers import (
     TelegramAuthSerializer
 )
 from .utils import check_auth, TOKEN
+from .parsers import PlainTextJSONParser
 
 
 @extend_schema(
@@ -100,6 +102,7 @@ class TelegramAuthAPIView(APIView):
     и возвращает JWT токены для дальнейшей работы с API.
     """
     permission_classes = [AllowAny]
+    parser_classes = [JSONParser, PlainTextJSONParser]
 
     def post(self, request):
         init_data_str = request.data.get("initData", "")
