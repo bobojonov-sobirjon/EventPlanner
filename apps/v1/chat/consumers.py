@@ -101,8 +101,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
             }, ensure_ascii=False))
     
     async def chat_message(self, event):
-        message = event['message']
-        
+        message = event['message'].copy()
+        # Har bir ulanish uchun: xabarni yuboruvchi (message['user']['id']) = initiator, qolganlar = receiver
+        sender_id = message.get('user', {}).get('id')
+        if self.user and getattr(self.user, 'id', None) == sender_id:
+            message['sender_type'] = 'initiator'
+        else:
+            message['sender_type'] = 'receiver'
         await self.send(text_data=json.dumps({
             'type': 'chat_message',
             'message': message
