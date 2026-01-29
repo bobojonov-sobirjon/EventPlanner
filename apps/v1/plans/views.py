@@ -493,7 +493,7 @@ class PlanGenerateTokenAPIView(APIView):
         
         bot_name = getattr(settings, 'BOT_NAME', 'your_bot')
         # Link yaratish: token ishlatamiz, plan_id emas
-        link = f"https://t.me/{bot_name}?startapp={token_str}"
+        link = f"https://t.me/{bot_name}/directlink?startapp={token_str}"
         
         # Получаем данные отправителя
         sender_name = f"{request.user.first_name or ''} {request.user.last_name or ''}".strip()
@@ -1248,7 +1248,7 @@ class PlanFriendsBulkTokenAPIView(APIView):
                 plan_user.save(update_fields=['status', 'updated_at'])
         
         # Link yaratish: token ishlatamiz
-        invite_link = f"https://t.me/{bot_name}?startapp={token_str}"
+        invite_link = f"https://t.me/{bot_name}/directlink?startapp={token_str}"
         
         # Формируем сообщение
         message_text = f"{sender_name} приглашает вас на план «{plan.name}» на {plan_datetime}. Присоединяйтесь: {invite_link}"
