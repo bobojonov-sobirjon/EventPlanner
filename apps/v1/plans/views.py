@@ -1256,30 +1256,51 @@ class PlanFriendsBulkTokenAPIView(APIView):
         sent_count = 0
         errors = []
         
-        # Bot API orqali xabar yuborish (eng oddiy usul)
-        if request.user.tg_id and bot_token:
-            for user in users:
-                if user.tg_id:
-                    try:
-                        telegram_api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-                        payload = {
-                            'chat_id': user.tg_id,
-                            'text': message_text,
-                            'parse_mode': 'HTML'
-                        }
-                        
-                        response = requests.post(telegram_api_url, json=payload, timeout=5)
-                        if response.status_code == 200:
-                            sent_count += 1
-                        else:
-                            errors.append(f"User {user.id}: {response.status_code}")
-                    except Exception as e:
-                        errors.append(f"User {user.id}: {str(e)}")
-        else:
+        # [DEBUG] Bot token va userlar tg_id tekshiruvi
+        print(f"[PlanFriendsBulkToken] TELEGRAM_BOT_TOKEN bor: {bool(bot_token)}")
+        print(f"[PlanFriendsBulkToken] BOT_NAME: {bot_name}")
+        print(f"[PlanFriendsBulkToken] Invite qilinadigan userlar soni: {len(users)}")
+        for u in users:
+            tg_id = getattr(u, 'tg_id', None)
+            telegram_id = getattr(u, 'telegram_id', None)
+            print(f"[PlanFriendsBulkToken] User id={u.id}, first_name={getattr(u, 'first_name', '')}, tg_id={tg_id}, telegram_id={telegram_id}")
+        
+        if not bot_token:
             return Response(
-                {'error': 'У вас нет Telegram ID или бот токен не настроен.'},
+                {'error': 'TELEGRAM_BOT_TOKEN не настроен. Добавьте токен бота в .env или настройки.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        
+        # Bot API orqali har bir do'stga (tg_id bor bo'lsa) xabar yuborish
+        telegram_api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        for user in users:
+            # tg_id yoki telegram_id (legacy) — Telegramda chat_id
+            chat_id = getattr(user, 'tg_id', None) or getattr(user, 'telegram_id', None)
+            if not chat_id:
+                print(f"[PlanFriendsBulkToken] User {user.id} — tg_id yo'q, xabar yuborilmaydi")
+                errors.append(f"User {user.id} ({getattr(user, 'first_name', '')}): нет Telegram ID (пользователь не входил через Telegram)")
+                continue
+            try:
+                payload = {
+                    'chat_id': chat_id,
+                    'text': message_text,
+                }
+                response = requests.post(telegram_api_url, json=payload, timeout=10)
+                if response.status_code == 200:
+                    sent_count += 1
+                    print(f"[PlanFriendsBulkToken] User {user.id} (tg_id={chat_id}) — xabar yuborildi OK")
+                else:
+                    try:
+                        err_body = response.json()
+                        err_desc = err_body.get('description', response.text)
+                    except Exception:
+                        err_desc = response.text
+                    print(f"[PlanFriendsBulkToken] User {user.id} (tg_id={chat_id}) — Telegram API xato: {response.status_code} — {err_desc}")
+                    errors.append(f"User {user.id} (tg_id={chat_id}): {response.status_code} — {err_desc}")
+            except Exception as e:
+                print(f"[PlanFriendsBulkToken] User {user.id} — Exception: {e}")
+                errors.append(f"User {user.id}: {str(e)}")
+        print(f"[PlanFriendsBulkToken] Yakuniy: sent_count={sent_count}, errors={len(errors)}")
         
         return Response({
             'message': f'Приглашения отправлены {sent_count} пользователям.',
