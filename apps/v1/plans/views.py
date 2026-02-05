@@ -502,7 +502,7 @@ class PlanGenerateTokenAPIView(APIView):
         
         # Форматируем дату плана
         plan_datetime = plan.datetime.strftime('%d.%m.%Y %H:%M')
-        msg = f"{sender_name} приглашает вас на план «{plan.name}» на {plan_datetime}. Присоединяйтесь: {link}"
+        msg = f"{sender_name} приглашает вас на встречу «{plan.name}» на {plan_datetime}. Присоединяйтесь: {link}"
         
         return Response({
             'plan_id': plan_id,
@@ -1251,7 +1251,7 @@ class PlanFriendsBulkTokenAPIView(APIView):
         invite_link = f"https://t.me/{bot_name}/direclink?startapp={token_str}"
         
         # Формируем сообщение
-        message_text = f"{sender_name} приглашает вас на план «{plan.name}» на {plan_datetime}. Присоединяйтесь: {invite_link}"
+        message_text = f"{sender_name} приглашает вас на встречу «{plan.name}» на {plan_datetime}. Присоединяйтесь: {invite_link}"
         
         sent_count = 0
         errors = []
