@@ -334,7 +334,7 @@ class ChatRoomMessagesAPIView(APIView):
         limit = int(request.query_params.get('limit', 50))
         offset = int(request.query_params.get('offset', 0))
         
-        messages = ChatRoomMessage.objects.filter(room=room).order_by('created_at')
+        messages = ChatRoomMessage.objects.filter(room=room).order_by('-created_at')
         total_count = messages.count()
         
         messages = messages[offset:offset + limit]
