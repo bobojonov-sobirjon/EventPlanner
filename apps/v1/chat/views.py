@@ -331,21 +331,12 @@ class ChatRoomMessagesAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        limit = int(request.query_params.get('limit', 50))
-        offset = int(request.query_params.get('offset', 0))
-        
         messages = ChatRoomMessage.objects.filter(room=room).order_by('-created_at')
-        total_count = messages.count()
-        
-        messages = messages[offset:offset + limit]
-        
         serializer = ChatRoomMessageSerializer(messages, many=True, context={'request': request})
         
         return Response({
             'messages': serializer.data,
-            'count': total_count,
-            'limit': limit,
-            'offset': offset
+            'count': len(serializer.data),
         }, status=status.HTTP_200_OK)
 
 
