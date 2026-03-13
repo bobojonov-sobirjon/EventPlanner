@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.conf import settings
+from django.utils import timezone
 from .models import Plan, PlanUser, GenerateTokenPlan
 
 
@@ -18,7 +19,9 @@ class PlanSerializer(serializers.ModelSerializer):
     
     def get_user(self, obj):
         from apps.v1.accounts.serializers import CustomUserSerializer
-        return CustomUserSerializer(obj.user).data
+        if obj.user:
+            return CustomUserSerializer(obj.user).data
+        return None
     
     def get_plan_users(self, obj):
         return PlanUserSerializer(obj.plan_users.all(), many=True).data
@@ -59,6 +62,7 @@ class PlanCreateSerializer(serializers.Serializer):
     )
     datetime = serializers.DateTimeField(
         required=True,
+        default_timezone=timezone.get_default_timezone(),
         help_text="Дата и время встречи (формат: YYYY-MM-DDTHH:MM:SS)"
     )
 
@@ -116,6 +120,7 @@ class PlanUpdateSerializer(serializers.Serializer):
     )
     datetime = serializers.DateTimeField(
         required=False,
+        default_timezone=timezone.get_default_timezone(),
         help_text="Дата и время встречи (формат: YYYY-MM-DDTHH:MM:SS)"
     )
 

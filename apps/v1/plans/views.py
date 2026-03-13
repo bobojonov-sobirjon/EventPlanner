@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
@@ -1394,3 +1394,4 @@ class PlanTokenDetailAPIView(APIView):
                 {'error': 'Токен не найден.'},
                 status=status.HTTP_404_NOT_FOUND
             )
+

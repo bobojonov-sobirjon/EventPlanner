@@ -11,7 +11,7 @@ from .views import (
     FriendsListAPIView,
     PlanFriendsAPIView,
     PlanFriendsBulkTokenAPIView,
-    PlanTokenDetailAPIView
+    PlanTokenDetailAPIView,
 )
 
 urlpatterns = [

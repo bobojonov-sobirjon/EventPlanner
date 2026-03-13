@@ -20,7 +20,9 @@ class Plan(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='plans',
-        verbose_name=_("Создатель")
+        verbose_name=_("Создатель"),
+        null=True,
+        blank=True
     )
     user_plan_number = models.IntegerField(default=1, verbose_name=_("Номер плана пользователя"))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Дата создания"))
@@ -36,8 +38,11 @@ class Plan(models.Model):
     
     def save(self, *args, **kwargs):
         if not self.pk:
-            user_plans_count = Plan.objects.filter(user=self.user).count()
-            self.user_plan_number = user_plans_count + 1
+            if self.user:
+                user_plans_count = Plan.objects.filter(user=self.user).count()
+                self.user_plan_number = user_plans_count + 1
+            else:
+                self.user_plan_number = 0
         super().save(*args, **kwargs)
 
 
