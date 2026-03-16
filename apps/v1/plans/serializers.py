@@ -8,6 +8,7 @@ class PlanSerializer(serializers.ModelSerializer):
     user = serializers.SerializerMethodField()
     plan_users = serializers.SerializerMethodField()
     count_user = serializers.SerializerMethodField()
+    datetime = serializers.SerializerMethodField()
     
     class Meta:
         model = Plan
@@ -16,6 +17,18 @@ class PlanSerializer(serializers.ModelSerializer):
             'datetime', 'user', 'user_plan_number', 'plan_users', 'count_user', 'created_at', 'updated_at'
         )
         read_only_fields = ('id', 'user', 'user_plan_number', 'created_at', 'updated_at')
+    
+    def get_datetime(self, obj):
+        """Har doim Moscow vaqtida qaytarish (Create va Detail bir xil bo'lashi uchun)."""
+        if obj.datetime is None:
+            return None
+        moscow_tz = timezone.get_default_timezone()
+        dt = obj.datetime
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, moscow_tz)
+        else:
+            dt = dt.astimezone(moscow_tz)
+        return dt.isoformat()
     
     def get_user(self, obj):
         from apps.v1.accounts.serializers import CustomUserSerializer
