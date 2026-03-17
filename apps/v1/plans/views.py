@@ -500,8 +500,13 @@ class PlanGenerateTokenAPIView(APIView):
         if not sender_name:
             sender_name = request.user.username or f"User {request.user.id}"
         
-        # Форматируем дату плана
-        plan_datetime = plan.datetime.strftime('%d.%m.%Y %H:%M')
+        # Форматируем дату плана (Moscow timezone da)
+        dt = plan.datetime
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.get_default_timezone())
+        else:
+            dt = dt.astimezone(timezone.get_default_timezone())
+        plan_datetime = dt.strftime('%d.%m.%Y %H:%M')
         msg = f"{sender_name} приглашает вас на встречу «{plan.name}» на {plan_datetime}. Присоединяйтесь: {link}"
         
         return Response({
@@ -1205,14 +1210,19 @@ class PlanFriendsBulkTokenAPIView(APIView):
         if not sender_name:
             sender_name = request.user.username or f"User {request.user.id}"
         
-        # Форматируем дату плана
-        plan_datetime = plan.datetime.strftime('%d.%m.%Y %H:%M')
-        
         # Xavfsiz token yaratish (bulk invite uchun - ko'p foydalanish mumkin)
         from .models import GenerateTokenPlan
         from datetime import timedelta
         from django.utils import timezone
         import uuid
+        
+        # Форматируем дату плана (Moscow timezone da)
+        dt = plan.datetime
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.get_default_timezone())
+        else:
+            dt = dt.astimezone(timezone.get_default_timezone())
+        plan_datetime = dt.strftime('%d.%m.%Y %H:%M')
         
         # Bulk invite uchun max_uses = userlar soni + bir nechta qo'shimcha
         max_uses = len(user_ids) + 5  # 5 ta qo'shimcha imkoniyat
